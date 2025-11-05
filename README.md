@@ -1,6 +1,6 @@
 # Number Range Predictor (1.00 - 5.00)
 
-A client-side ML-powered application that predicts the next number in a sequence using categorical analysis and weighted-mean forecasting. The model learns from user feedback to improve accuracy over time.
+A client-side ML-powered application that predicts the next number category in a sequence using categorical analysis and transition probabilities. The model learns from range-based user feedback to improve accuracy over time.
 
 ## Features
 
@@ -68,44 +68,49 @@ function predictNext(sequence) {
     (a, b) => lags.filter(v => v === a).length - lags.filter(v => v === b).length
   ).pop();
   const label = ["Low", "Mid", "High"][mode];
-  const roughValue = weightedMean(sequence, mode);
   const unique = new Set(lags).size;
   const confidence = ((6 - unique) / 5 * 100).toFixed(0);
-  return { label, roughValue, confidence };
+  return { label, confidence };
 }
 \`\`\`
 
-### Two-Step Feedback System
+### Range-Based Feedback System
 
-After each prediction, the feedback flow is:
+After each prediction, user provides feedback by clicking one of three range buttons:
 
-1. **Step 1: Correctness** - User selects "✓ Correct" or "✗ Wrong"
-2. **Step 2: Actual Value** - User enters the true number (1.00 - 5.00 range)
-   - Validation: Value must be within 1.00 - 5.00
-   - Error display: Inline red error if out of range
-   - Both paths add the actual value to the dataset
+- **Low (1.00 – 2.50)** - Click if actual value fell in this range
+- **Mid (2.51 – 3.75)** - Click if actual value fell in this range
+- **High (3.76 – 5.00)** - Click if actual value fell in this range
 
-Model automatically retrains and generates the next prediction immediately after submission.
+**How it works:**
+1. User clicks the range button corresponding to the actual value
+2. System uses representative value for that range:
+   - Low: 1.75
+   - Mid: 3.10
+   - High: 4.40
+3. Representative value is appended to sequence (capped at 200)
+4. Transition matrix updates automatically
+5. Model retrains and generates new prediction instantly
+6. Accuracy metrics update in real-time
 
-### Rolling Accuracy Tracking
+**No manual input required** - just click the appropriate range button!
 
-- **Overall Accuracy**: Tracks all predictions ever made
-- **Rolling Accuracy**: Tracks accuracy over last 20 predictions separately
-- **Real-time Updates**: Metrics refresh immediately after each feedback submission
+### Accuracy Tracking
+
+- **Accuracy**: Tracks prediction correctness over last 20 range selections
+- **Real-time Updates**: Metrics refresh immediately after each range button click
 - **Formula**: (Correct predictions / Total predictions) × 100
+- **Display**: Shown as percentage with progress bar in Statistics panel
 
 ### Data Persistence
 
 All data is stored in localStorage with automatic capping at 200 entries:
 
 \`\`\`typescript
-interface StoredData {
-  sequence: number[]              // Historical values (max 200)
-  correctCount: number            // Total correct predictions
-  totalCount: number              // Total feedback submissions
-  rollingAccuracy: boolean[]      // Last 20 outcomes (true/false)
-  transitionMatrix: Record<string, number>  // Category transitions
-}
+// Stored in separate localStorage keys:
+sequence: number[]              // Historical values (max 200)
+rollingAccuracy: boolean[]      // Last 20 outcomes (true/false)
+transitionMatrix: Record<string, number>  // Category transitions
 \`\`\`
 
 ## Architecture
@@ -126,24 +131,26 @@ interface StoredData {
 - Instructions: "Enter numbers between 1.00 and 5.00"
 
 #### `components/prediction-result.tsx`
-- Two-step feedback UI: first correctness selection, then actual value input
-- Shows predicted category with color coding (Blue/Amber/Red)
-- Displays rough numerical value and confidence percentage
-- Confidence progress bar visualization
-- Inline validation for actual value (1.00-5.00)
-- Error message display with validation rules
+- Displays predicted range (Low/Mid/High) with color coding
+- Shows confidence percentage with progress bar
+- Three range buttons for user feedback:
+  - Low (1.00 – 2.50)
+  - Mid (2.51 – 3.75)
+  - High (3.76 – 5.00)
+- Buttons highlight on click with smooth animations
+- Instant model update on button click
 
 #### `components/feedback-tracker.tsx`
-- Displays overall accuracy meter
-- Shows rolling accuracy (last 20 predictions)
-- Statistics display (predictions made, correct/wrong counts)
+- Displays accuracy percentage (based on last 20 predictions)
+- Progress bar visualization with smooth animations
+- Shows number of predictions tracked
 - Current sequence length with max 200 cap indicator
 
 #### `components/number-chart.tsx`
 - Recharts line chart visualization
-- Reference lines at 2.5 and 3.75 showing category boundaries
+- Reference lines at 2.50 and 3.75 showing category boundaries
 - Interactive tooltip on hover
-- Includes predicted point when available
+- Y-axis scaled for 1.00-5.00 range
 
 ### Prediction Engine (`lib/prediction-engine.ts`)
 
@@ -173,10 +180,9 @@ interface StoredData {
 - Updated with each feedback submission
 
 **`predictNext(sequence)`**
-- Main prediction function using weighted mean approach
+- Main prediction function using lag features
 - Finds mode of recent 5 states
-- Applies weighted mean to that category
-- Returns prediction object with label, roughValue, and confidence
+- Returns prediction object with label and confidence (no numeric estimate)
 
 ## Usage Workflow
 
@@ -188,31 +194,31 @@ Validation: ✓ All values in range 1.00-5.00
 
 ### Step 2: View Prediction
 \`\`\`
-Category: Mid
-Rough Value: 3.42
-Confidence: 78%
-Explanation: Recent Mid values weighted → 3.42
+Predicted Range: Mid
+Confidence: 82%
 \`\`\`
 
-### Step 3: Provide Feedback (Two Steps)
+### Step 3: Provide Feedback (One Click)
 \`\`\`
-Step 1: Select "✓ Correct" or "✗ Wrong"
-Step 2: Enter actual value (e.g., 3.50)
-Validation: ✓ Value accepted
-Error (if out of range): "Value must be between 1.00 and 5.00"
+Click the appropriate range button:
+[ Low (1.00–2.50) ] [ Mid (2.51–3.75) ] [ High (3.76–5.00) ]
+
+Example: Actual value was 3.50 → Click "Mid (2.51–3.75)"
+- Representative value (3.10) added to sequence
+- Model retrains instantly
+- New prediction appears automatically
 \`\`\`
 
 ### Step 4: Monitor Performance
 \`\`\`
-Overall Accuracy: 68% (15/22 correct)
-Rolling Accuracy: 75% (15/20 in last 20)
+Accuracy: 73%
+Based on last 20 predictions
 Sequence Length: 22 numbers (max 200)
 \`\`\`
 
 ### Step 5: View Visualization
 \`\`\`
-Line chart shows all numbers with category boundaries at 2.5 and 3.75
-Predicted point appears on chart automatically
+Line chart shows all numbers with category boundaries at 2.50 and 3.75
 \`\`\`
 
 ## Input Validation Rules
@@ -232,29 +238,27 @@ Categorize: [Low, Low, Low, Mid, Low]
 Last 5 States: [Low, Low, Low, Mid, Low]
 Mode: Low (4 occurrences)
 
-Weighted Mean Calculation:
-Same Category (Low): [1.5, 2.3, 1.8, 2.1]
-Weights: [0.512, 0.64, 0.8, 1.0]  (exponential decay)
-Weighted Sum: 1.5×0.512 + 2.3×0.64 + 1.8×0.8 + 2.1×1.0 = 5.464
-Weight Sum: 0.512 + 0.64 + 0.8 + 1.0 = 2.952
-Weighted Mean: 5.464 / 2.952 = 1.85
-
 Lag Uniqueness: 2 unique states (Low, Mid)
 Confidence: ((6-2)/5) × 100 = 80%
 
 Prediction:
-- Category: Low
-- Rough Value: 1.85
+- Predicted Range: Low
 - Confidence: 80%
+
+User Feedback:
+User clicks "Low (1.00–2.50)" button
+→ Representative value 1.75 added to sequence
+→ Transition matrix updated
+→ New prediction generated automatically
 \`\`\`
 
 ## Performance Characteristics
 
 - Sequence capped at 200 entries for optimal performance
-- Rolling accuracy tracked over last 20 predictions
-- Overall accuracy never capped (all-time metric)
-- Weighted mean provides realistic numeric forecasts
+- Accuracy tracked over last 20 predictions
+- Range-based feedback eliminates input errors
 - Confidence typically ranges 40-100% based on pattern strength
+- Instant model retraining on each feedback click
 - Input validation prevents invalid data from affecting model
 
 ## Technology Stack
@@ -269,23 +273,19 @@ Prediction:
 ## Getting Started
 
 1. Enter a sequence of numbers (1.00-5.00 range only)
-2. View the prediction with category and confidence
-3. Mark correctness and enter actual value (1.00-5.00)
-4. Model automatically learns and generates next prediction
+2. View the prediction with range category and confidence
+3. Click the range button that matches where the actual value fell
+4. Model automatically learns and generates next prediction instantly
 5. Monitor accuracy improving over time
 
 ## localStorage Structure
 
-All data saved to key `'predictionData'`:
+Data saved to separate localStorage keys:
 
 \`\`\`typescript
-{
-  sequence: number[],
-  correctCount: number,
-  totalCount: number,
-  rollingAccuracy: boolean[],
-  transitionMatrix: Record<string, number>
-}
+localStorage.setItem('sequence', JSON.stringify(number[]))
+localStorage.setItem('rollingAccuracy', JSON.stringify(boolean[]))
+localStorage.setItem('transitionMatrix', JSON.stringify(Record<string, number>))
 \`\`\`
 
 ## Reset
@@ -297,14 +297,23 @@ Click "Reset All Data" to clear all stored information and start fresh. This act
 - Transition matrix
 - All predictions and feedback
 
-## Latest Updates
+## Latest Updates (November 2025)
 
-- **Input Range**: Restricted to 1.00 - 5.00 ONLY (was 1-15)
-- **Categorization**: Three categories (Low, Mid, High)
-- **Boundaries**: 2.5 and 3.75 thresholds
-- **Weighted Mean**: Exponential decay formula (0.8^(n-i))
+### Major Changes
+- **Feedback System**: Replaced manual input with range-based buttons
+- **No Text Input**: Removed "Correct/Wrong" buttons and actual value input field
+- **One-Click Feedback**: Click Low/Mid/High range button corresponding to actual value
+- **Instant Updates**: Model retrains automatically on each button click
+- **Representative Values**: Low=1.75, Mid=3.10, High=4.40 used for learning
+- **Simplified Display**: Shows only Predicted Range and Confidence (no numeric estimate)
+- **Streamlined UI**: Clean 3-color design with horizontal range buttons
+- **Accuracy Only**: Single accuracy metric based on last 20 predictions
+
+### Technical Details
+- **Input Range**: 1.00 - 5.00 ONLY
+- **Categorization**: Three ranges (Low, Mid, High)
+- **Boundaries**: 2.50 and 3.75 thresholds
 - **Category Midpoints**: 1.75 (Low), 3.10 (Mid), 4.40 (High)
-- **Feedback**: Two-step flow with actual value input
-- **Validation**: Strict range checking with inline error messages
 - **Confidence**: ((6 - unique) / 5) × 100 formula
 - **Sequence Cap**: 200 entries maximum for performance
+- **Storage**: Separate localStorage keys for sequence, accuracy, and transition matrix
