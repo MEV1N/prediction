@@ -7,35 +7,39 @@ import { PredictionForm } from "@/components/prediction-form"
 import { PredictionResult } from "@/components/prediction-result"
 import { FeedbackTracker } from "@/components/feedback-tracker"
 import { NumberChart } from "@/components/number-chart"
-import { PredictionEngine } from "@/lib/prediction-engine"
-
-interface StoredData {
-  sequence: number[]
-  rollingAccuracy: boolean[]
-  transitionMatrix: Record<string, number>
-}
+import { 
+  predictNextAbove7, 
+  updateModel, 
+  getModelParameters,
+  setModelParameters,
+  resetModel
+} from "@/lib/predictor-above7"
 
 export default function Home() {
   const [sequence, setSequence] = useState<number[]>([])
   const [prediction, setPrediction] = useState<any>(null)
-  const [rollingAccuracy, setRollingAccuracy] = useState<boolean[]>([])
-  const [transitionMatrix, setTransitionMatrix] = useState<Record<string, number>>({})
+  const [correctPredictions, setCorrectPredictions] = useState<number>(0)
+  const [totalPredictions, setTotalPredictions] = useState<number>(0)
   const [error, setError] = useState("")
 
   // Initialize from localStorage
   useEffect(() => {
     const storedSequence = localStorage.getItem("sequence")
-    const storedAccuracy = localStorage.getItem("rollingAccuracy")
-    const storedMatrix = localStorage.getItem("transitionMatrix")
+    const storedModelParams = localStorage.getItem("modelParameters")
+    const storedCorrect = localStorage.getItem("correctPredictions")
+    const storedTotal = localStorage.getItem("totalPredictions")
     
     if (storedSequence) {
       setSequence(JSON.parse(storedSequence))
     }
-    if (storedAccuracy) {
-      setRollingAccuracy(JSON.parse(storedAccuracy))
+    if (storedModelParams) {
+      setModelParameters(JSON.parse(storedModelParams))
     }
-    if (storedMatrix) {
-      setTransitionMatrix(JSON.parse(storedMatrix))
+    if (storedCorrect) {
+      setCorrectPredictions(JSON.parse(storedCorrect))
+    }
+    if (storedTotal) {
+      setTotalPredictions(JSON.parse(storedTotal))
     }
   }, [])
 
@@ -44,31 +48,25 @@ export default function Home() {
     if (sequence.length > 0) {
       localStorage.setItem("sequence", JSON.stringify(sequence))
     }
-    if (rollingAccuracy.length > 0) {
-      localStorage.setItem("rollingAccuracy", JSON.stringify(rollingAccuracy))
-    }
-    if (Object.keys(transitionMatrix).length > 0) {
-      localStorage.setItem("transitionMatrix", JSON.stringify(transitionMatrix))
-    }
-  }, [sequence, rollingAccuracy, transitionMatrix])
+  }, [sequence])
+
+  useEffect(() => {
+    localStorage.setItem("correctPredictions", JSON.stringify(correctPredictions))
+  }, [correctPredictions])
+
+  useEffect(() => {
+    localStorage.setItem("totalPredictions", JSON.stringify(totalPredictions))
+  }, [totalPredictions])
 
   const handlePrediction = (input: string) => {
     setError("")
     const numbers = input
       .split(/[,\s]+/)
       .map((n) => Number.parseFloat(n))
-      .filter((n) => !isNaN(n))
-
-    for (const num of numbers) {
-      const validation = PredictionEngine.validateInput(num)
-      if (!validation.valid) {
-        setError(validation.error || "Invalid input")
-        return
-      }
-    }
+      .filter((n) => !isNaN(n) && isFinite(n))
 
     if (numbers.length === 0) {
-      setError("Please enter at least one number")
+      setError("Please enter at least one valid number")
       return
     }
 
@@ -76,32 +74,37 @@ export default function Home() {
     setSequence(newSequence)
 
     // Generate prediction
-    const result = PredictionEngine.predictNext(newSequence)
+    const result = predictNextAbove7(newSequence)
     setPrediction(result)
   }
 
-  const handleRangeClick = (range: "Low" | "Mid" | "High") => {
-    // Get representative value for the range
-    const representative = range === "Low" ? 1.75 : range === "Mid" ? 3.10 : 4.40
-    
+  const handleFeedback = (actualValue: number) => {
+    if (!prediction) return
+
+    // Determine if actual value exceeds 7
+    const actualExceeds7 = actualValue > 7
+
     // Check if prediction was correct
-    const wasCorrect = prediction?.label === range
+    const wasCorrect = prediction.willExceed7 === actualExceeds7
+
+    // Update accuracy tracking
+    setCorrectPredictions(prev => prev + (wasCorrect ? 1 : 0))
+    setTotalPredictions(prev => prev + 1)
+
+    // Update model with online learning
+    updateModel(actualValue, prediction)
     
-    // Append representative value to sequence
-    const newSequence = [...sequence, representative].slice(-200)
+    // Save updated model parameters to localStorage
+    const params = getModelParameters()
+    localStorage.setItem("modelParameters", JSON.stringify(params))
+
+    // Append actual value to sequence
+    const newSequence = [...sequence, actualValue].slice(-200)
     setSequence(newSequence)
-
-    // Update transition matrix
-    const newMatrix = PredictionEngine.buildTransitionMatrix(newSequence)
-    setTransitionMatrix(newMatrix)
-
-    // Update accuracy
-    const newRollingAccuracy = [...rollingAccuracy, wasCorrect].slice(-20)
-    setRollingAccuracy(newRollingAccuracy)
 
     // Generate new prediction immediately
     setTimeout(() => {
-      const newPrediction = PredictionEngine.predictNext(newSequence)
+      const newPrediction = predictNextAbove7(newSequence)
       setPrediction(newPrediction)
     }, 150)
   }
@@ -109,30 +112,34 @@ export default function Home() {
   const handleReset = () => {
     setSequence([])
     setPrediction(null)
-    setRollingAccuracy([])
-    setTransitionMatrix({})
+    resetModel()
+    setCorrectPredictions(0)
+    setTotalPredictions(0)
     setError("")
     localStorage.removeItem("sequence")
-    localStorage.removeItem("rollingAccuracy")
-    localStorage.removeItem("transitionMatrix")
+    localStorage.removeItem("modelParameters")
+    localStorage.removeItem("correctPredictions")
+    localStorage.removeItem("totalPredictions")
   }
 
+  const accuracy = totalPredictions > 0 ? (correctPredictions / totalPredictions) * 100 : 0
+
   return (
-    <main className="min-h-screen bg-gradient-to-br from-background to-muted p-6">
+    <main className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold text-foreground">Number Range Predictor</h1>
-          <p className="text-muted-foreground">
-            Predict number categories (Low, Mid, High) with weighted-mean forecasting
+          <h1 className="text-4xl font-bold">Above 7 Predictor</h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Will the next number exceed 7? ML-powered predictions with continuous learning.
           </p>
         </div>
 
         {/* Error Message */}
         {error && (
-          <Card className="p-4 bg-red-50 border-red-200">
-            <p className="text-red-800 text-sm font-medium">{error}</p>
-          </Card>
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-red-800 dark:text-red-300 text-sm font-medium">{error}</p>
+          </div>
         )}
 
         {/* Main Content Grid */}
@@ -141,22 +148,21 @@ export default function Home() {
           <div className="lg:col-span-2 space-y-6">
             {/* Input Card */}
             <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4 text-foreground">Enter Number Sequence</h2>
+              <h2 className="text-xl font-semibold mb-4">Enter Number Sequence</h2>
               <PredictionForm onPredict={handlePrediction} />
             </Card>
 
-            {/* Result Card with Range Feedback */}
+            {/* Result Card with Feedback */}
             {prediction && (
-              <Card className="p-6 bg-accent/5 border-accent/20">
-                <h2 className="text-xl font-semibold mb-4 text-foreground">Prediction Result</h2>
-                <PredictionResult prediction={prediction} onRangeClick={handleRangeClick} />
+              <Card className="p-6">
+                <PredictionResult result={prediction} onFeedback={handleFeedback} />
               </Card>
             )}
 
             {/* Chart */}
             {sequence.length > 0 && (
               <Card className="p-6">
-                <h2 className="text-xl font-semibold mb-4 text-foreground">Sequence Visualization</h2>
+                <h2 className="text-xl font-semibold mb-4">Sequence Visualization</h2>
                 <NumberChart numbers={sequence} />
               </Card>
             )}
@@ -164,16 +170,14 @@ export default function Home() {
 
           {/* Right Column: Stats */}
           <div className="space-y-6">
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4 text-foreground">Statistics</h2>
-              <FeedbackTracker
-                rollingAccuracy={rollingAccuracy}
-                sequenceLength={sequence.length}
-              />
-            </Card>
+            <FeedbackTracker
+              accuracy={accuracy}
+              totalPredictions={totalPredictions}
+              sequenceLength={sequence.length}
+            />
 
             {/* Reset Button */}
-            <Button onClick={handleReset} variant="outline" className="w-full bg-transparent">
+            <Button onClick={handleReset} variant="outline" className="w-full">
               Reset All Data
             </Button>
           </div>

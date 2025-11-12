@@ -1,108 +1,128 @@
 "use client"
 
-import type React from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 
 interface PredictionResultProps {
-  prediction: {
-    label: string
-    confidence: string | number
-  }
-  onRangeClick: (range: "Low" | "Mid" | "High") => void
+  result: {
+    willExceed7: boolean
+    probability: number
+    confidence: number
+    reasoning: string
+  } | null
 }
 
-export function PredictionResult({ prediction, onRangeClick }: PredictionResultProps) {
-  const getRangeDisplay = (range: string) => {
-    switch (range) {
-      case "Low":
-        return "1.00 – 2.50"
-      case "Mid":
-        return "2.51 – 3.75"
+export function PredictionResult({ result, onFeedback }: PredictionResultProps & { onFeedback: (actualValue: number) => void }) {
+  const [actualInput, setActualInput] = useState("")
+  const [error, setError] = useState("")
+
+  if (!result) return null
+
+  const { willExceed7, probability, confidence, reasoning } = result
+
+  // Calculate certainty level
+  let certainty = "Low"
+  if (confidence >= 80) certainty = "High"
+  else if (confidence >= 60) certainty = "Medium"
+
+  const getCertaintyColor = (cert: string) => {
+    switch (cert) {
       case "High":
-        return "3.76 – 5.00"
+        return "text-emerald-600"
+      case "Medium":
+        return "text-amber-600"
+      case "Low":
+        return "text-gray-600"
       default:
-        return ""
+        return "text-foreground"
     }
   }
 
-  const getRangeColors = (range: string) => {
-    switch (range) {
-      case "Low":
-        return {
-          bg: "bg-blue-100 hover:bg-blue-200 active:bg-blue-300",
-          text: "text-blue-700",
-          border: "border-blue-300"
-        }
-      case "Mid":
-        return {
-          bg: "bg-amber-100 hover:bg-amber-200 active:bg-amber-300",
-          text: "text-amber-700",
-          border: "border-amber-300"
-        }
-      case "High":
-        return {
-          bg: "bg-red-100 hover:bg-red-200 active:bg-red-300",
-          text: "text-red-700",
-          border: "border-red-300"
-        }
-      default:
-        return {
-          bg: "bg-muted hover:bg-muted/80",
-          text: "text-foreground",
-          border: "border-border"
-        }
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const value = Number.parseFloat(actualInput)
+
+    if (isNaN(value) || !isFinite(value)) {
+      setError("Please enter a valid number")
+      return
     }
-  }
 
-  const handleRangeClick = (range: "Low" | "Mid" | "High") => {
-    onRangeClick(range)
+    onFeedback(value)
+    setActualInput("")
+    setError("")
   }
-
-  const colors = getRangeColors(prediction.label)
 
   return (
     <div className="space-y-6">
       {/* Prediction Display */}
-      <div className="p-6 border-2 border-border rounded-lg bg-background">
+      <div className="p-6 rounded-2xl shadow-md bg-white dark:bg-gray-800">
+        <h2 className="text-xl font-semibold mb-4">Next Value Prediction</h2>
+        
         <div className="space-y-4">
-          <div className="text-center">
-            <p className="text-sm text-muted-foreground mb-2">Predicted Range:</p>
-            <p className={`text-4xl font-bold ${colors.text}`}>{prediction.label}</p>
+          {/* Main Prediction */}
+          <div className="text-center py-4">
+            <p className="text-lg mb-2 text-gray-600 dark:text-gray-400">
+              {willExceed7 ? "Next value will likely exceed 7" : "Next value expected to stay at or below 7"}
+            </p>
           </div>
-          <div className="text-center">
-            <p className="text-sm text-muted-foreground mb-2">Confidence:</p>
-            <p className="text-3xl font-bold text-foreground">{prediction.confidence}%</p>
+
+          {/* Probability */}
+          <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Probability:</p>
+            <p className="text-3xl font-bold">{(probability * 100).toFixed(1)}%</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-muted rounded-full h-3">
-              <div
-                className="bg-primary h-3 rounded-full transition-all duration-300"
-                style={{ width: `${prediction.confidence}%` }}
-              />
+
+          {/* Confidence & Certainty Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Confidence:</p>
+              <p className="text-2xl font-bold">{confidence.toFixed(0)}%</p>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Certainty:</p>
+              <p className={`text-2xl font-bold ${getCertaintyColor(certainty)}`}>{certainty}</p>
             </div>
           </div>
+
+          {/* Confidence Bar */}
+          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+            <div
+              className="bg-blue-500 h-3 rounded-full transition-all duration-300"
+              style={{ width: `${confidence}%` }}
+            />
+          </div>
+
+          {/* Reasoning */}
+          {reasoning && (
+            <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Analysis:</p>
+              <p className="text-sm italic">{reasoning}</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Range Buttons */}
-      <div className="space-y-3">
-        <p className="font-semibold text-foreground text-center">Actual Range:</p>
-        <div className="grid grid-cols-3 gap-3">
-          {(["Low", "Mid", "High"] as const).map((range) => {
-            const rangeColors = getRangeColors(range)
-            return (
-              <button
-                key={range}
-                onClick={() => handleRangeClick(range)}
-                className={`${rangeColors.bg} ${rangeColors.text} border-2 ${rangeColors.border} rounded-lg p-4 font-semibold text-center transition-all duration-150 transform active:scale-95`}
-              >
-                <div className="text-sm mb-1">{range}</div>
-                <div className="text-xs font-normal">({getRangeDisplay(range)})</div>
-              </button>
-            )
-          })}
+      {/* Feedback Input */}
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <p className="font-semibold">What was the actual next value?</p>
+        <div>
+          <input
+            type="number"
+            step="any"
+            value={actualInput}
+            onChange={(e) => setActualInput(e.target.value)}
+            placeholder="e.g., 8.5 or 3.2"
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+          <p className="text-xs text-gray-500 mt-1">
+            Enter any real number. The model learns from your feedback.
+          </p>
         </div>
-      </div>
+        <Button type="submit" className="w-full">
+          Submit Feedback
+        </Button>
+      </form>
     </div>
   )
 }

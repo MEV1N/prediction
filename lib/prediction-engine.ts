@@ -1,118 +1,289 @@
 /**
- * Prediction Engine - Categorization and Prediction (1.00 - 5.00 Range)
+ * Spike Probability Predictor - Continuous ML Model
  *
- * Implements categorical ML algorithm with weighted mean prediction.
- * Uses 1.00 - 5.00 input range with categories:
- * - Low (≤2.5), Mid (2.5-3.75), High (>3.75)
+ * Predicts probability of next value exceeding 7.0 using:
+ * - Rolling statistical features (mean, std, slope)
+ * - Logistic regression with online weight updates
+ * - Adaptive learning from user feedback
  *
- * Weighted mean uses exponential decay (0.8 factor) for recent values.
+ * No range restrictions - accepts any real numbers.
  */
 
-interface Prediction {
-  label: "Low" | "Mid" | "High"
-  confidence: number | string
+interface SpikePrediction {
+  predictedSpike: boolean
+  probability: number
+  confidence: number
+  certaintyLabel: "High Certainty" | "Medium Certainty" | "Low Certainty"
+  reason: string
+  features: {
+    mean: number
+    std: number
+    slope: number
+  }
+}
+
+interface ModelWeights {
+  intercept: number
+  meanWeight: number
+  stdWeight: number
+  slopeWeight: number
+}
+
+// Global model weights (initialized, can be updated online)
+let weights: ModelWeights = {
+  intercept: -3.5,
+  meanWeight: 0.4,
+  stdWeight: 1.1,
+  slopeWeight: 0.8,
 }
 
 /**
- * Updated categorization to 1-5 range only
- * Low: ≤ 2.5, Mid: 2.5-3.75, High: > 3.75
- */
-export function categorize(x: number): number {
-  if (x < 1 || x > 5) throw new Error("Value out of range (1–5)")
-  if (x <= 2.5) return 0 // Low
-  if (x <= 3.75) return 1 // Mid
-  return 2 // High
-}
-
-/**
- * Validates input is ONLY within 1.00 - 5.00 range (NOT 1-15)
+ * Validates input is a valid number (no restrictions on range)
  */
 export function validateInput(x: number): { valid: boolean; error?: string } {
   if (isNaN(x)) return { valid: false, error: "Please enter a valid number" }
-  if (x < 1) return { valid: false, error: "Value must be between 1.00 and 5.00" }
-  if (x > 5) return { valid: false, error: "Value must be between 1.00 and 5.00" }
+  if (!isFinite(x)) return { valid: false, error: "Value must be finite" }
   return { valid: true }
 }
 
 /**
- * Gets the category label from numeric category
+ * Calculate rolling mean from last N values
  */
-function getCategoryLabel(category: number): "Low" | "Mid" | "High" {
-  const labels = ["Low", "Mid", "High"] as const
-  return labels[Math.max(0, Math.min(2, category))]
+function calculateMean(values: number[]): number {
+  if (values.length === 0) return 0
+  const sum = values.reduce((acc, val) => acc + val, 0)
+  return sum / values.length
 }
 
 /**
- * Updated category midpoints for 1-5 range:
- * Low: 1.75, Mid: 3.10, High: 4.40
+ * Calculate rolling standard deviation from last N values
  */
-function getCategoryMidpoint(category: number): number {
-  const midpoints = [1.75, 3.1, 4.4]
-  return midpoints[Math.max(0, Math.min(2, category))]
+function calculateStd(values: number[]): number {
+  if (values.length === 0) return 0
+  const mean = calculateMean(values)
+  const squaredDiffs = values.map((val) => Math.pow(val - mean, 2))
+  const variance = squaredDiffs.reduce((acc, val) => acc + val, 0) / values.length
+  return Math.sqrt(variance)
 }
 
 /**
- * Weighted mean prediction using exponential decay (0.8^(n-i) formula)
- * Recent values get higher weights
+ * Calculate slope (trend) from first to last value
  */
-function weightedMean(sequence: number[], mode: number): number {
-  const sameCat = sequence.slice(-10).filter((x) => categorize(x) === mode)
+function calculateSlope(values: number[]): number {
+  if (values.length < 2) return 0
+  return values[values.length - 1] - values[0]
+}
 
-  if (sameCat.length === 0) {
-    return getCategoryMidpoint(mode)
+/**
+ * Extract statistical features from sequence
+ * Uses last 10 values for rolling window
+ */
+function extractFeatures(sequence: number[]): { mean: number; std: number; slope: number } {
+  const window = sequence.slice(-10)
+  
+  if (window.length === 0) {
+    return { mean: 0, std: 0, slope: 0 }
   }
 
-  const weights = sameCat.map((_, i) => Math.pow(0.8, sameCat.length - i))
-  const mean = sameCat.reduce((sum, x, i) => sum + x * weights[i], 0) / weights.reduce((a, b) => a + b, 0)
-
-  return Number.parseFloat(mean.toFixed(2))
+  return {
+    mean: calculateMean(window),
+    std: calculateStd(window),
+    slope: calculateSlope(window),
+  }
 }
 
 /**
- * Confidence calculation based on unique lag states
- * Formula: ((6 - unique) / 5) * 100
+ * Sigmoid function for probability calculation
  */
-function calculateConfidence(lags: number[]): string {
-  const unique = new Set(lags).size
-  const confidence = (((6 - unique) / 5) * 100).toFixed(0)
-  return confidence
+function sigmoid(z: number): number {
+  return 1 / (1 + Math.exp(-z))
 }
 
 /**
- * Build transition matrix from sequence
+ * Generate reason/explanation for prediction
  */
-export function buildTransitionMatrix(sequence: number[]): Record<string, number> {
-  const matrix: Record<string, number> = {}
+function generateReason(features: { mean: number; std: number; slope: number }, probability: number): string {
+  const { mean, std, slope } = features
+  const reasons: string[] = []
 
-  for (let i = 0; i < sequence.length - 1; i++) {
-    const from = categorize(sequence[i])
-    const to = categorize(sequence[i + 1])
-    const key = `${from}->${to}`
-    matrix[key] = (matrix[key] || 0) + 1
+  // Mean-based reasoning
+  if (mean > 6) {
+    reasons.push("rolling mean approaching spike threshold")
+  } else if (mean > 4) {
+    reasons.push("elevated rolling mean")
+  } else if (mean < 2) {
+    reasons.push("low rolling mean suggests stability")
   }
 
-  return matrix
+  // Volatility-based reasoning
+  if (std > 2) {
+    reasons.push("high volatility detected")
+  } else if (std > 1) {
+    reasons.push("moderate volatility")
+  } else if (std < 0.5) {
+    reasons.push("stable pattern with low variance")
+  }
+
+  // Trend-based reasoning
+  if (slope > 3) {
+    reasons.push("strong upward trend")
+  } else if (slope > 1) {
+    reasons.push("gradual upward trend")
+  } else if (slope < -3) {
+    reasons.push("strong downward trend")
+  } else if (slope < -1) {
+    reasons.push("gradual downward trend")
+  } else {
+    reasons.push("stable trend")
+  }
+
+  // Combine reasoning
+  if (reasons.length === 0) {
+    return probability > 0.5 ? "pattern indicators suggest spike likely" : "no strong spike indicators detected"
+  }
+
+  return reasons.join(", ")
 }
 
 /**
- * Main prediction function using lag features
- * Gets mode from last 5 states to predict category
+ * Get certainty label based on confidence score
  */
-export function predictNext(sequence: number[]): Prediction {
-  const states = sequence.map(categorize)
-  const lags = states.slice(-5)
+function getCertaintyLabel(confidence: number): "High Certainty" | "Medium Certainty" | "Low Certainty" {
+  if (confidence >= 80) return "High Certainty"
+  if (confidence >= 60) return "Medium Certainty"
+  return "Low Certainty"
+}
 
-  const mode = lags.sort((a, b) => lags.filter((v) => v === a).length - lags.filter((v) => v === b).length).pop() ?? 0
+/**
+ * Main prediction function using logistic regression
+ * Predicts probability that next value will exceed 7.0
+ */
+export function predictNext(sequence: number[]): SpikePrediction {
+  // Need at least 2 values for meaningful prediction
+  if (sequence.length < 2) {
+    return {
+      predictedSpike: false,
+      probability: 0.5,
+      confidence: 0,
+      certaintyLabel: "Low Certainty",
+      reason: "insufficient data for prediction",
+      features: { mean: 0, std: 0, slope: 0 },
+    }
+  }
 
-  const label = getCategoryLabel(mode)
-  const confidence = calculateConfidence(lags)
+  // Extract features
+  const features = extractFeatures(sequence)
 
-  return { label, confidence }
+  // Calculate logistic regression score
+  const z =
+    weights.intercept +
+    weights.meanWeight * features.mean +
+    weights.stdWeight * features.std +
+    weights.slopeWeight * features.slope
+
+  // Convert to probability using sigmoid
+  const probability = sigmoid(z)
+
+  // Determine if spike predicted (threshold = 0.5)
+  const predictedSpike = probability > 0.5
+
+  // Calculate confidence (distance from 0.5, scaled to 0-100)
+  const confidence = Math.min(100, Math.abs(probability - 0.5) * 200)
+
+  // Get certainty label
+  const certaintyLabel = getCertaintyLabel(confidence)
+
+  // Generate human-readable reason
+  const reason = generateReason(features, probability)
+
+  return {
+    predictedSpike,
+    probability: Number(probability.toFixed(4)),
+    confidence: Number(confidence.toFixed(0)),
+    certaintyLabel,
+    reason,
+    features,
+  }
+}
+
+/**
+ * Update model weights using online learning
+ * Uses gradient descent with learning rate = 0.01
+ *
+ * @param actualSpike - Whether actual value exceeded 7.0
+ * @param predicted - Predicted probability
+ * @param features - Feature values used for prediction
+ */
+export function updateModel(
+  actualSpike: boolean,
+  predicted: number,
+  features: { mean: number; std: number; slope: number }
+): void {
+  const actual = actualSpike ? 1 : 0
+  const error = actual - predicted
+  const learningRate = 0.01
+
+  // Update weights using gradient descent
+  weights.intercept += learningRate * error
+  weights.meanWeight += learningRate * error * features.mean
+  weights.stdWeight += learningRate * error * features.std
+  weights.slopeWeight += learningRate * error * features.slope
+
+  // Save updated weights to localStorage
+  saveWeights()
+}
+
+/**
+ * Save model weights to localStorage
+ */
+function saveWeights(): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("modelWeights", JSON.stringify(weights))
+  }
+}
+
+/**
+ * Load model weights from localStorage
+ */
+export function loadWeights(): void {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem("modelWeights")
+    if (stored) {
+      try {
+        weights = JSON.parse(stored)
+      } catch (e) {
+        // Keep default weights if parsing fails
+        console.warn("Failed to load model weights, using defaults")
+      }
+    }
+  }
+}
+
+/**
+ * Reset model weights to default values
+ */
+export function resetWeights(): void {
+  weights = {
+    intercept: -3.5,
+    meanWeight: 0.4,
+    stdWeight: 1.1,
+    slopeWeight: 0.8,
+  }
+  saveWeights()
+}
+
+/**
+ * Get current model weights (for debugging/inspection)
+ */
+export function getWeights(): ModelWeights {
+  return { ...weights }
 }
 
 export const PredictionEngine = {
-  categorize,
   validateInput,
-  buildTransitionMatrix,
   predictNext,
+  updateModel,
+  loadWeights,
+  resetWeights,
+  getWeights,
 }

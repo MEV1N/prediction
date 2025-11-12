@@ -12,31 +12,49 @@ export function NumberChart({ numbers }: NumberChartProps) {
     value: num,
   }))
 
-  const minValue = Math.min(...numbers, 1) - 0.5
-  const maxValue = Math.max(...numbers, 5) + 0.5
+  // Dynamic Y-axis to accommodate any values
+  const minValue = Math.min(...numbers)
+  const maxValue = Math.max(...numbers)
+  const padding = (maxValue - minValue) * 0.1 || 1
+  
+  const yAxisMin = Math.floor(minValue - padding)
+  const yAxisMax = Math.ceil(maxValue + padding)
 
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-        <XAxis dataKey="index" stroke="var(--color-muted-foreground)" />
-        <YAxis domain={[Math.max(0.5, minValue), Math.min(5.5, maxValue)]} stroke="var(--color-muted-foreground)" />
+        <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+        <XAxis 
+          dataKey="index" 
+          className="text-gray-600 dark:text-gray-400"
+          tick={{ fill: "currentColor" }}
+        />
+        <YAxis 
+          domain={[yAxisMin, yAxisMax]} 
+          className="text-gray-600 dark:text-gray-400"
+          tick={{ fill: "currentColor" }}
+        />
         <Tooltip
           contentStyle={{
-            backgroundColor: "var(--color-background)",
-            border: `1px solid var(--color-border)`,
+            backgroundColor: "white",
+            border: "1px solid #e5e7eb",
             borderRadius: "0.5rem",
           }}
-          labelStyle={{ color: "var(--color-foreground)" }}
+          labelStyle={{ color: "#374151" }}
         />
-        <ReferenceLine y={2.5} stroke="#3b82f6" strokeDasharray="5 5" label="Low/Mid: 2.50" />
-        <ReferenceLine y={3.75} stroke="#f59e0b" strokeDasharray="5 5" label="Mid/High: 3.75" />
+        {/* Threshold line at y = 7 */}
+        <ReferenceLine 
+          y={7} 
+          stroke="#ef4444" 
+          strokeDasharray="3 3" 
+          label={{ value: ">7 Threshold", fill: "#ef4444", fontSize: 12 }}
+        />
         <Line
           type="monotone"
           dataKey="value"
-          stroke="var(--color-primary)"
-          dot={{ fill: "var(--color-primary)", r: 5 }}
-          activeDot={{ r: 7 }}
+          stroke="#3b82f6"
+          dot={{ fill: "#3b82f6", r: 4 }}
+          activeDot={{ r: 6 }}
           strokeWidth={2}
         />
       </LineChart>

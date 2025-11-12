@@ -26,11 +26,11 @@ export function PredictionForm({ onPredict }: PredictionFormProps) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="e.g., 1.5 3.2 2.1 4.8 or 1.5, 3.2, 2.1, 4.8"
+          placeholder="e.g., 1.5 3.2 6.1 8.4 or 2.3, 4.5, 7.2, 9.1"
           className="w-full px-4 py-2 border border-input rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <p className="text-xs text-muted-foreground mt-1">
-          Enter numbers between 1.00 and 5.00 (comma or space-separated)
+          Enter any real numbers (comma or space-separated). Spike threshold: &gt; 7.0
         </p>
       </div>
 
